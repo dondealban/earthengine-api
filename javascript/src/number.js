@@ -12,7 +12,7 @@ goog.require('ee.ComputedObject');
 /**
  * Constructs a new Number.
  *
- * @param {number|Object} number A number or a computed object.
+ * @param {number|!Object} number A number or a computed object.
  *
  * @constructor
  * @extends {ee.ComputedObject}
@@ -36,11 +36,11 @@ ee.Number = function(number) {
    */
   this.number_;
 
-  if (goog.isNumber(number)) {
-    goog.base(this, null, null);
+  if (typeof number === 'number') {
+    ee.Number.base(this, 'constructor', null, null);
     this.number_ = /** @type {number} */ (number);
   } else if (number instanceof ee.ComputedObject) {
-    goog.base(this, number.func, number.args, number.varName);
+    ee.Number.base(this, 'constructor', number.func, number.args, number.varName);
     this.number_ = null;
   } else {
     throw Error('Invalid argument specified for ee.Number(): ' + number);
@@ -77,10 +77,10 @@ ee.Number.reset = function() {
  * @override
  */
 ee.Number.prototype.encode = function(encoder) {
-  if (goog.isNumber(this.number_)) {
+  if (typeof this.number_ === 'number') {
     return this.number_;
   } else {
-    return goog.base(this, 'encode', encoder);
+    return ee.Number.base(this, 'encode', encoder);
   }
 };
 

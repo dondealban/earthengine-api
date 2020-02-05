@@ -106,8 +106,8 @@ ee.Types.isSubtype = function(firstType, secondType) {
  * @return {boolean} Whether the object is a number or number variable.
  */
 ee.Types.isNumber = function(obj) {
-  return goog.isNumber(obj) ||
-         (obj instanceof ee.ComputedObject && obj.name() == 'Number');
+  return typeof obj === 'number' ||
+      (obj instanceof ee.ComputedObject && obj.name() == 'Number');
 };
 
 
@@ -118,8 +118,8 @@ ee.Types.isNumber = function(obj) {
  * @return {boolean} Whether the object is a string or string variable.
  */
 ee.Types.isString = function(obj) {
-  return goog.isString(obj) ||
-         (obj instanceof ee.ComputedObject && obj.name() == 'String');
+  return typeof obj === 'string' ||
+      (obj instanceof ee.ComputedObject && obj.name() == 'String');
 };
 
 
@@ -143,8 +143,31 @@ ee.Types.isArray = function(obj) {
 ee.Types.isRegularObject = function(obj) {
   if (goog.isObject(obj) && !goog.isFunction(obj)) {
     var proto = Object.getPrototypeOf(obj);
-    return !goog.isNull(proto) && goog.isNull(Object.getPrototypeOf(proto));
+    return proto !== null && Object.getPrototypeOf(proto) === null;
   } else {
     return false;
   }
+};
+
+/**
+ * Assume keyword arguments if we get a single dictionary.
+ * @param {!Array<?>} args actual arguments to function call
+ * @param {!ee.Function.Signature} signature
+ * @param {boolean=} isInstance true if function is invoked on existing instance
+ * @return {boolean} true if the first element of args should be treated as a
+ *     dictionary of keyword arguments.
+ */
+ee.Types.useKeywordArgs = function(args, signature, isInstance = false) {
+  if (args.length === 1 && ee.Types.isRegularObject(args[0])) {
+    let formalArgs = signature['args'];
+    if (isInstance) {
+      formalArgs = formalArgs.slice(1);
+    }
+    if (formalArgs.length) {
+      const requiresOneArg =
+          formalArgs.length === 1 || formalArgs[1]['optional'];
+      return !requiresOneArg || formalArgs[0]['type'] !== 'Dictionary';
+    }
+  }
+  return false;
 };

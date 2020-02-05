@@ -11,7 +11,7 @@ var visParams = {
   gamma: [1.1, 1.1, 1]
 };
 
-var images = ee.ImageCollection('LANDSAT/LT5_SR')
+var images = ee.ImageCollection('LANDSAT/LT05/C01/T1_SR')
     .filterBounds(box)
     .filterDate('1984-01-01', '1991-01-01');
 
@@ -56,7 +56,7 @@ function combine(a, b) {
 var thumbnail = ui.Thumbnail({
   params: combine(visParams, {
     dimensions: '256x256',
-    region: box.toGeoJSON(),
+    region: box,
   }),
   style: {height: '300px', width: '300px'},
   onClick: function(widget) {

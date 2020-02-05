@@ -11,14 +11,15 @@ from datetime import datetime
 import json
 import os
 import re
+import tempfile
 import threading
 import time
 
 import urllib
 import httplib2
 
-import oauth2client.client
-
+from google.cloud import storage
+from google.oauth2.credentials import Credentials
 import ee
 
 HOMEDIR = os.path.expanduser('~')
@@ -33,6 +34,9 @@ CONFIG_PARAMS = {
     'account': None,
     'private_key': None,
     'refresh_token': None,
+    'use_cloud_api': False,
+    'cloud_api_key': None,
+    'project': None,
 }
 
 TASK_FINISHED_STATES = (ee.batch.Task.State.COMPLETED,
@@ -47,34 +51,85 @@ class CommandLineConfig(object):
   specified as a constructor argument. If not provided, it attempts to load
   the configuration from a file specified via the EE_CONFIG_FILE environment
   variable. If the variable is not set, it looks for a JSON file at the
-  path ~/.config/earthengine/credentials. If all fails, it fallsback to using
+  path ~/.config/earthengine/credentials. If all fails, it falls back to using
   some predefined defaults for each configuration parameter.
+
+  If --service_account_file is specified, it is used instead.
   """
 
-  def __init__(self, config_file=None):
+  def __init__(
+      self, config_file=None, service_account_file=None, use_cloud_api=False,
+      project_override=None):
     if not config_file:
       config_file = os.environ.get(EE_CONFIG_FILE, DEFAULT_EE_CONFIG_FILE)
     self.config_file = config_file
+    self.project_override = project_override
     config = {}
     if os.path.exists(config_file):
       with open(config_file) as config_file_json:
         config = json.load(config_file_json)
+    CONFIG_PARAMS['use_cloud_api'] = use_cloud_api
     for key, default_value in CONFIG_PARAMS.items():
       setattr(self, key, config.get(key, default_value))
+    self.service_account_file = service_account_file
+    if service_account_file:
+      # Load the file to verify that it exists.
+      with open(service_account_file) as service_file_json:
+        service = json.load(service_file_json)
+      for key, value in service.items():
+        setattr(self, key, value)
+
+  def _get_credentials(self):
+    """Acquires credentials."""
+    if self.service_account_file:
+      return ee.ServiceAccountCredentials(self.client_email,
+                                          self.service_account_file)
+    elif self.account and self.private_key:
+      return ee.ServiceAccountCredentials(self.account, self.private_key)
+    elif self.refresh_token:
+      return Credentials(
+          None,
+          refresh_token=self.refresh_token,
+          token_uri=ee.oauth.TOKEN_URI,
+          client_id=ee.oauth.CLIENT_ID,
+          client_secret=ee.oauth.CLIENT_SECRET,
+          scopes=ee.oauth.SCOPES)
+    else:
+      return 'persistent'
+
+  # TODO(user): We now have two ways of accessing GCS. storage.Client is
+  #            preferred and we should eventually migrate to just use that
+  #            instead of sending raw HTTP requests.
+  def create_gcs_helper(self):
+    """Creates a GcsHelper using the same credentials EE authorizes with."""
+    project = self._get_project()
+    if project is None:
+      raise ValueError('A project is required to access Cloud Storage. It '
+                       'can be set per-call by passing the --project flag or '
+                       'by setting the \'project\' parameter in your Earth '
+                       'Engine config file.')
+    creds = self._get_credentials()
+    if creds == 'persistent':
+      creds = ee.data.get_persistent_credentials()
+    return GcsHelper(
+        storage.Client(project=project, credentials=creds))
+
+  def _get_project(self):
+    # If a --project flag is passed into a command, it supercedes the one set
+    # by calling the set_project command.
+    if self.project_override:
+      return self.project_override
+    else:
+      return self.project
 
   def ee_init(self):
-    """Load the EE credentils and initialize the EE client."""
-    if self.account and self.private_key:
-      credentials = ee.ServiceAccountCredentials(self.account, self.private_key)
-    elif self.refresh_token:
-      credentials = oauth2client.client.OAuth2Credentials(
-          None, ee.oauth.CLIENT_ID, ee.oauth.CLIENT_SECRET,
-          self.refresh_token, None,
-          'https://accounts.google.com/o/oauth2/token', None)
-    else:
-      credentials = 'persistent'
-
-    ee.Initialize(credentials=credentials, opt_url=self.url)
+    """Loads the EE credentials and initializes the EE client."""
+    ee.Initialize(
+        credentials=self._get_credentials(),
+        opt_url=self.url,
+        use_cloud_api=self.use_cloud_api,
+        cloud_api_key=self.cloud_api_key,
+        project=self._get_project())
 
   def save(self):
     config = {}
@@ -84,6 +139,83 @@ class CommandLineConfig(object):
         config[key] = value
     with open(self.config_file, 'w') as output_file:
       json.dump(config, output_file)
+
+
+class GcsHelper(object):
+  """A helper for manipulating files in GCS."""
+
+  def __init__(self, client):
+    self.client = client
+
+  @staticmethod
+  def _split_gcs_path(path):
+    m = re.search('gs://([a-z0-9-_.]*)/(.*)', path, re.IGNORECASE)
+    if not m:
+      raise ValueError('\'{}\' is not a valid GCS path'.format(path))
+
+    return m.groups()
+
+  @staticmethod
+  def _canonicalize_dir_path(path):
+    return path.strip().rstrip('/')
+
+  def _get_blobs_under_path(self, path):
+    bucket, prefix = GcsHelper._split_gcs_path(
+        GcsHelper._canonicalize_dir_path(path))
+    return self.client.get_bucket(bucket).list_blobs(prefix=prefix + '/')
+
+  def check_gcs_dir_within_size(self, path, max_bytes):
+    blobs = self._get_blobs_under_path(path)
+    total_bytes = 0
+    for blob in blobs:
+      total_bytes += blob.size
+      if total_bytes > max_bytes:
+        raise ValueError('Size of files in \'{}\' exceeds allowed size: '
+                         '{} > {}.'.format(path, total_bytes, max_bytes))
+    if total_bytes == 0:
+      raise ValueError('No files found at \'{}\'.'.format(path))
+
+  def download_dir_to_temp(self, path):
+    """Downloads recursively the contents at a GCS path to a temp directory."""
+    canonical_path = GcsHelper._canonicalize_dir_path(path)
+    blobs = self._get_blobs_under_path(canonical_path)
+    temp_dir = tempfile.mkdtemp()
+
+    _, prefix = GcsHelper._split_gcs_path(canonical_path)
+    for blob in blobs:
+      stripped_name = blob.name[len(prefix):]
+      if stripped_name == '/':
+        continue
+
+      output_path = temp_dir + stripped_name
+      dir_path = os.path.dirname(output_path)
+      if not os.path.exists(dir_path):
+        os.makedirs(dir_path)
+
+      if output_path[-1:] != '/':
+        blob.download_to_filename(output_path)
+
+    return temp_dir
+
+  def upload_dir_to_bucket(self, source_path, dest_path):
+    """Uploads a directory to cloud storage."""
+    canonical_path = GcsHelper._canonicalize_dir_path(source_path)
+
+    files = list()
+    for dirpath, _, filenames in os.walk(canonical_path):
+      files += [os.path.join(dirpath, f) for f in filenames]
+
+    bucket, prefix = GcsHelper._split_gcs_path(
+        GcsHelper._canonicalize_dir_path(dest_path))
+    bucket_client = self.client.get_bucket(bucket)
+
+    for f in files:
+      relative_file = f[len(canonical_path):]
+      bucket_client.blob(prefix + relative_file).upload_from_filename(f)
+
+
+def is_gcs_path(path):
+  return path.strip().startswith('gs://')
 
 
 def query_yes_no(msg):
@@ -116,7 +248,7 @@ def wait_for_task(task_id, timeout, log_progress=True):
       print('Task %s ended at state: %s after %.2f seconds'
             % (task_id, state, elapsed))
       if error_message:
-        print('Error: %s' % error_message)
+        raise ee.ee_exception.EEException('Error: %s' % error_message)
       return
     if log_progress and elapsed - last_check >= 30:
       print('[{:%H:%M:%S}] Current state for task {}: {}'
@@ -237,16 +369,19 @@ def _gcs_ls(bucket, prefix=''):
           'Unexpected HTTP error: %s' % e.message)
 
     if response.status < 100 or response.status >= 300:
-      raise ee.ee_exception.EEException(('Error retreiving bucket %s;'
+      raise ee.ee_exception.EEException(('Error retrieving bucket %s;'
                                          ' Server returned HTTP code: %d' %
                                          (bucket, response.status)))
 
     json_content = json.loads(content)
     if 'error' in json_content:
       json_error = json_content['error']['message']
-      raise ee.ee_exception.EEException('Error retreiving bucket %s: %s' %
+      raise ee.ee_exception.EEException('Error retrieving bucket %s: %s' %
                                         (bucket, json_error))
 
+    if 'items' not in json_content:
+      raise ee.ee_exception.EEException(
+          'Cannot find items list in the response from GCS: %s' % json_content)
     objects = json_content['items']
     object_names = [str(gc_object['name']) for gc_object in objects]
 

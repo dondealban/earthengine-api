@@ -26,6 +26,8 @@ goog.require('ee.Number');
 goog.require('ee.String');
 goog.require('ee.Terrain');
 goog.require('ee.Types');
+/** @suppress {extraRequire} */
+goog.require('ee.batch');
 goog.require('ee.data');
 goog.require('goog.array');
 goog.require('goog.object');
@@ -72,7 +74,7 @@ ee.initialize = function(
     return;
   }
 
-  var isAsynchronous = goog.isDefAndNotNull(opt_successCallback);
+  var isAsynchronous = (opt_successCallback != null);
 
   // Register the error callback.
   if (opt_errorCallback) {
@@ -232,7 +234,7 @@ ee.ready = function() {
  * @export
  */
 ee.call = function(func, var_args) {
-  if (goog.isString(func)) {
+  if (typeof func === 'string') {
     func = new ee.ApiFunction(func);
   }
   // Extract var_args.
@@ -254,7 +256,7 @@ ee.call = function(func, var_args) {
  * @export
  */
 ee.apply = function(func, namedArgs) {
-  if (goog.isString(func)) {
+  if (typeof func === 'string') {
     func = new ee.ApiFunction(func);
   }
   return func.apply(namedArgs);
@@ -353,9 +355,9 @@ ee.initializationFailure_ = function(e) {
  * @suppress {accessControls} We are calling functions with partial promotion.
  */
 ee.promote_ = function(arg, klass) {
-  if (goog.isNull(arg)) {
+  if (arg === null) {
     return null;
-  } else if (!goog.isDef(arg)) {
+  } else if (arg === undefined) {
     return undefined;
   }
 
@@ -406,7 +408,7 @@ ee.promote_ = function(arg, klass) {
     case 'Filter':
       return new ee.Filter(/** @type {Object} */ (arg));
     case 'Algorithm':
-      if (goog.isString(arg)) {
+      if (typeof arg === 'string') {
         // An API function name.
         return new ee.ApiFunction(arg);
       } else if (goog.isFunction(arg)) {
@@ -453,7 +455,7 @@ ee.promote_ = function(arg, klass) {
         } else if (ctor) {
           // The client-side constructor will call the server-side constructor.
           return new exportedEE[klass](arg);
-        } else if (goog.isString(arg)) {
+        } else if (typeof arg === 'string') {
           if (arg in exportedEE[klass]) {
             // arg is the name of a method on klass.
             return exportedEE[klass][arg].call();
@@ -628,16 +630,21 @@ ee.makeClass_ = function(name) {
       } else if (firstArgIsPrimitive) {
         // Can't cast a primitive.
         shouldUseConstructor = true;
-      } else if (args[0].func != ctor) {
-        // We haven't already called the constructor on this object.
+      } else if (!args[0].func ||
+          args[0].func.getSignature().returns != ctor.getSignature().returns) {
+        // We have a single ComputedObject argument. If it returns a different
+        // type, we need to call the constructor. Otherwise this is a copy
+        // constructor usage, and we can simply cast.
         shouldUseConstructor = true;
       }
     }
 
     // Apply our decision.
     if (shouldUseConstructor) {
+      const namedArgs = ee.Types.useKeywordArgs(args, ctor.getSignature())
+          ? args[0] : ctor.nameArgs(args);
       // Call manually to avoid having promote() called on the output.
-      goog.base(this, ctor, ctor.promoteArgs(ctor.nameArgs(args)));
+      target.base(this, 'constructor', ctor, ctor.promoteArgs(namedArgs));
     } else {
       // Just cast and hope for the best.
       if (!onlyOneArg) {
@@ -649,7 +656,8 @@ ee.makeClass_ = function(name) {
                     '. Must be a ComputedObject.');
       }
       var theOneArg = args[0];
-      goog.base(this, theOneArg.func, theOneArg.args, theOneArg.varName);
+      target.base(this, 'constructor',
+          theOneArg.func, theOneArg.args, theOneArg.varName);
     }
   };
   goog.inherits(target, ee.ComputedObject);

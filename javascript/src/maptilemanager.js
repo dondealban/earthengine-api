@@ -37,6 +37,7 @@ goog.require('goog.events');
 goog.require('goog.events.Event');
 goog.require('goog.events.EventTarget');
 goog.require('goog.events.EventType');
+goog.require('goog.html.SafeUrl');
 goog.require('goog.net.EventType');
 goog.require('goog.net.ImageLoader');
 goog.require('goog.net.XhrIo');
@@ -52,7 +53,7 @@ goog.require('goog.structs.PriorityPool');
  * @export
  */
 ee.MapTileManager = function() {
-  goog.base(this);
+  ee.MapTileManager.base(this, 'constructor');
 
   /**
    * The pool of tokens.
@@ -126,11 +127,10 @@ ee.MapTileManager.prototype.send = function(
   }
   // Make the Request object.
   var request = new ee.MapTileManager.Request_(
-      id, url,
-      opt_imageCompletedCallback,
+      id, url, opt_imageCompletedCallback,
       goog.bind(this.releaseRequest_, this),
-      goog.isDef(opt_maxRetries) ?
-          opt_maxRetries : ee.MapTileManager.MAX_RETRIES);
+      opt_maxRetries !== undefined ? opt_maxRetries :
+                                     ee.MapTileManager.MAX_RETRIES);
   this.requests_.set(id, request);
 
   // Setup the callback for the pool.
@@ -267,8 +267,9 @@ ee.MapTileManager.Request_ = function(
    * @type {number}
    * @private
    */
-  this.maxRetries_ = goog.isDef(opt_maxRetries) ?
-      opt_maxRetries : ee.MapTileManager.MAX_RETRIES;
+  this.maxRetries_ = (opt_maxRetries !== undefined) ?
+      opt_maxRetries :
+      ee.MapTileManager.MAX_RETRIES;
 
   /**
    * Callback attached to the events of the ImageLoader object.
@@ -608,19 +609,20 @@ ee.MapTileManager.Request_.prototype.start_ = function() {
       // Store the response, but only if it is not an error, because if we did
       // then we would attempt to interpret the error response as an image.
       // This also ensures that the Code Editor can display the error message.
-      var objectUrl;
+      var objectUrl, ok;
       if (xhrIo.getStatus() >= 200 && xhrIo.getStatus() < 300) {
         try {
-          objectUrl = URL.createObjectURL(
-              /** @type {!Blob} */ (xhrIo.getResponse()));
+          objectUrl = goog.html.SafeUrl.unwrap(goog.html.SafeUrl.fromBlob(
+              /** @type {!Blob} */ (xhrIo.getResponse())));
+          ok = (objectUrl !== goog.html.SafeUrl.INNOCUOUS_STRING);
         } catch (e) {
-          // Browser did not support blob response, or browser did not support
-          // createObjectURL, or we made a mistake. We will fall back to
-          // re-requesting the tile as an image since objectUrl is left as null.
+          // Browser did not support blob response, or we made a mistake. We
+          // will fall back to re-requesting the tile as an image since ok is
+          // still null.
         }
       }
 
-      actuallyLoadImage(objectUrl || sourceUrl);
+      actuallyLoadImage(ok ? objectUrl : sourceUrl);
     }, this));
     xhrIo.listenOnce(goog.net.EventType.READY, goog.bind(xhrIo.dispose, xhrIo));
     xhrIo.send(sourceUrl, 'GET');
@@ -640,6 +642,7 @@ ee.MapTileManager.Request_.prototype.start_ = function() {
  * @extends {goog.Disposable}
  */
 ee.MapTileManager.Token_ = function() {
+  ee.MapTileManager.Token_.base(this, 'constructor');
 
   /**
    * Whether the current object is used by a request.
@@ -697,7 +700,7 @@ ee.MapTileManager.TokenPool_.prototype.createObject = function() {
 /**
  * Should be overridden to dispose of an object, default implementation is to
  * remove all its members which should render it useless.
- * @param {?Object} obj The object to dispose of.
+ * @param {!ee.MapTileManager.Token_} obj The object to dispose of.
  * @override
  */
 ee.MapTileManager.TokenPool_.prototype.disposeObject = function(obj) {

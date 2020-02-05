@@ -30,7 +30,7 @@ ee.Serializer = function(opt_isCompound) {
    * Whether the encoding should factor out shared subtrees.
    *
    * @type {boolean}
-   * @private
+   * @private @const
    */
   this.isCompound_ = opt_isCompound !== false;
 
@@ -65,14 +65,14 @@ goog.exportSymbol('ee.Serializer', ee.Serializer);
 
 /**
  * A JSON serializer instance for this class
- * @private
+ * @private @const
  */
 ee.Serializer.jsonSerializer_ = new goog.json.Serializer();
 
 
 /**
  * A hash instance for this class
- * @private
+ * @private @const
  */
 ee.Serializer.hash_ = new goog.crypt.Md5();
 
@@ -86,7 +86,7 @@ ee.Serializer.hash_ = new goog.crypt.Md5();
  * @export
  */
 ee.Serializer.encode = function(obj, opt_isCompound) {
-  var compound = goog.isDef(opt_isCompound) ? opt_isCompound : true;
+  var compound = (opt_isCompound !== undefined) ? opt_isCompound : true;
   return new ee.Serializer(compound).encode_(obj);
 };
 
@@ -96,6 +96,7 @@ ee.Serializer.encode = function(obj, opt_isCompound) {
  * @param {*} obj The object to Serialize.
  * @return {string} A JSON representation of the input.
  * @export
+ * @suppress {checkPrototypalTypes}
  */
 ee.Serializer.toJSON = function(obj) {
   return ee.Serializer.jsonSerializer_.serialize(ee.Serializer.encode(obj));
@@ -109,8 +110,15 @@ ee.Serializer.toJSON = function(obj) {
  * @export
  */
 ee.Serializer.toReadableJSON = function(obj) {
-  var eeSerializer = new ee.Serializer(false);
-  var encoded = eeSerializer.encode_(obj);
+  return ee.Serializer.stringify(ee.Serializer.encode(obj, false));
+};
+
+
+/**
+ * @param {*} encoded
+ * @return {string} A human-friendly JSON representation of the input.
+ */
+ee.Serializer.stringify = function(encoded) {
   if ('JSON' in goog.global) {
     // All modern browsers; Pretty-print.
     return goog.global['JSON']['stringify'](encoded, null, '  ');
@@ -158,14 +166,14 @@ ee.Serializer.prototype.encode_ = function(object) {
 
 /**
  * Encodes a subtree as a Value in the EE API v2 (DAG) format. If isCompound_
- * is true, this will fill the {@code scope} and {@code encoded} properties.
+ * is true, this will fill the `scope` and `encoded` properties.
  *
  * @param {*} object The object to encode.
  * @return {*} The encoded object.
  * @private
  */
 ee.Serializer.prototype.encodeValue_ = function(object) {
-  if (!goog.isDef(object)) {
+  if (object === undefined) {
     throw Error('Can\'t encode an undefined value.');
   }
 
@@ -180,10 +188,9 @@ ee.Serializer.prototype.encodeValue_ = function(object) {
       'type': 'ValueRef',
       'value': this.encoded_[hash]
     };
-  } else if (object === null ||
-      goog.isBoolean(object) ||
-      goog.isNumber(object) ||
-      goog.isString(object)) {
+  } else if (
+      object === null || typeof object === 'boolean' ||
+      typeof object === 'number' || typeof object === 'string') {
     // Primitives are encoded as is and not saved in the scope.
     return object;
   } else if (goog.isDateLike(object)) {
@@ -192,7 +199,7 @@ ee.Serializer.prototype.encodeValue_ = function(object) {
     return {
       'type': 'Invocation',
       'functionName': 'Date',
-      'arguments': {'value': Math.floor(/** @type {Date} */(object).getTime())}
+      'arguments': {'value': Math.floor(/** @type {!Date} */(object).getTime())}
     };
   } else if (object instanceof ee.Encodable) {
     // Some objects know how to encode themselves.
@@ -226,9 +233,7 @@ ee.Serializer.prototype.encodeValue_ = function(object) {
   }
 
   if (this.isCompound_) {
-    ee.Serializer.hash_.reset();
-    ee.Serializer.hash_.update(ee.Serializer.jsonSerializer_.serialize(result));
-    hash = ee.Serializer.hash_.digest().toString();
+    hash = ee.Serializer.computeHash(result);
     var name;
     if (this.encoded_[hash]) {
       name = this.encoded_[hash];
@@ -248,3 +253,15 @@ ee.Serializer.prototype.encodeValue_ = function(object) {
     return result;
   }
 };
+
+
+/**
+ * @param {*} obj An object to hash. Any JSON-serializable type is acceptable.
+ * @return {string}
+ */
+ee.Serializer.computeHash = function(obj) {
+  ee.Serializer.hash_.reset();
+  ee.Serializer.hash_.update(ee.Serializer.jsonSerializer_.serialize(obj));
+  return ee.Serializer.hash_.digest().toString();
+};
+

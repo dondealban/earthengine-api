@@ -21,9 +21,6 @@ goog.require('goog.array');
 goog.require('goog.json.Serializer');
 goog.require('goog.object');
 
-goog.forwardDeclare('ee.ErrorMargin');
-goog.forwardDeclare('ee.Projection');
-
 
 
 /**
@@ -58,8 +55,8 @@ ee.Geometry = function(geoJson, opt_proj, opt_geodesic, opt_evenOdd) {
   }
 
   // Note: evenOdd is a parameter name and may be a key in the
-  // first argument, the geoJson object. This means ee.arguments.extract()
-  // cannot reliably differentiate:
+  // first argument, the geoJson object. This means
+  // ee.arguments.extractFromFunction() cannot reliably differentiate:
   //
   //       1) ee.Geometry(myGeoJsonObject)
   //  from 2) ee.Geometry({geoJson: myGeoJsonObject})
@@ -68,9 +65,9 @@ ee.Geometry = function(geoJson, opt_proj, opt_geodesic, opt_evenOdd) {
   // which is not an expected param name. If we see this key in the first
   // argument, we know the arguments were passed in sequence. If not, we
   // assume the user intended to pass a named argument dictionary and use
-  // ee.arguments.extract() to validate and extract the keys.
+  // ee.arguments.extractFromFunction() to validate and extract the keys.
   if (!('type' in geoJson)) {
-    var args = ee.arguments.extract(ee.Geometry, arguments);
+    var args = ee.arguments.extractFromFunction(ee.Geometry, arguments);
     geoJson = args['geoJson'];
     opt_proj = args['proj'];
     opt_geodesic = args['geodesic'];
@@ -81,16 +78,15 @@ ee.Geometry = function(geoJson, opt_proj, opt_geodesic, opt_evenOdd) {
 
   var computed = geoJson instanceof ee.ComputedObject &&
                  !(geoJson instanceof ee.Geometry && geoJson.type_);
-  var options = (goog.isDefAndNotNull(opt_proj) ||
-                 goog.isDefAndNotNull(opt_geodesic) ||
-                 goog.isDefAndNotNull(opt_evenOdd));
+  var options =
+      (opt_proj != null || opt_geodesic != null || opt_evenOdd != null);
   if (computed) {
     if (options) {
       throw new Error(
           'Setting the CRS, geodesic, or evenOdd flag on a computed Geometry ' +
           'is not supported.  Use Geometry.transform().');
     } else {
-      goog.base(this, geoJson.func, geoJson.args, geoJson.varName);
+      ee.Geometry.base(this, 'constructor', geoJson.func, geoJson.args, geoJson.varName);
       return;
     }
   }
@@ -104,7 +100,7 @@ ee.Geometry = function(geoJson, opt_proj, opt_geodesic, opt_evenOdd) {
     throw Error('Invalid GeoJSON geometry: ' + JSON.stringify(geoJson));
   }
 
-  goog.base(this, null, null);
+  ee.Geometry.base(this, 'constructor', null, null);
 
   /**
    * The type of the geometry.
@@ -119,8 +115,7 @@ ee.Geometry = function(geoJson, opt_proj, opt_geodesic, opt_evenOdd) {
    * @type {Array?}
    * @private
    */
-  this.coordinates_ =
-      goog.isDefAndNotNull(geoJson['coordinates']) ?
+  this.coordinates_ = (geoJson['coordinates'] != null) ?
       goog.object.unsafeClone(geoJson['coordinates']) :
       null;
 
@@ -137,13 +132,12 @@ ee.Geometry = function(geoJson, opt_proj, opt_geodesic, opt_evenOdd) {
    * @private
    */
   this.proj_;
-  if (goog.isDefAndNotNull(opt_proj)) {
+  if (opt_proj != null) {
     this.proj_ = opt_proj;
   } else if ('crs' in geoJson) {
-    if (goog.isObject(geoJson['crs']) &&
-        geoJson['crs']['type'] == 'name' &&
+    if (goog.isObject(geoJson['crs']) && geoJson['crs']['type'] == 'name' &&
         goog.isObject(geoJson['crs']['properties']) &&
-        goog.isString(geoJson['crs']['properties']['name'])) {
+        typeof geoJson['crs']['properties']['name'] === 'string') {
       this.proj_ = geoJson['crs']['properties']['name'];
     } else {
       throw Error('Invalid CRS declaration in GeoJSON: ' +
@@ -157,7 +151,7 @@ ee.Geometry = function(geoJson, opt_proj, opt_geodesic, opt_evenOdd) {
    * @private
    */
   this.geodesic_ = opt_geodesic;
-  if (!goog.isDef(this.geodesic_) && 'geodesic' in geoJson) {
+  if (this.geodesic_ === undefined && 'geodesic' in geoJson) {
     this.geodesic_ = Boolean(geoJson['geodesic']);
   }
 
@@ -168,7 +162,7 @@ ee.Geometry = function(geoJson, opt_proj, opt_geodesic, opt_evenOdd) {
    * @private
    */
   this.evenOdd_ = opt_evenOdd;
-  if (!goog.isDef(this.evenOdd_) && 'evenOdd' in geoJson) {
+  if (this.evenOdd_ === undefined && 'evenOdd' in geoJson) {
     this.evenOdd_ = Boolean(geoJson['evenOdd']);
   }
 };
@@ -235,7 +229,7 @@ ee.Geometry.Point = function(coords, opt_proj) {
       throw Error('The Geometry.Point constructor requires 2 coordinates.');
     }
   }
-  goog.base(this, init);
+  ee.Geometry.Point.base(this, 'constructor', init);
 };
 goog.inherits(ee.Geometry.Point, ee.Geometry);
 
@@ -265,7 +259,7 @@ ee.Geometry.MultiPoint = function(coords, opt_proj) {
   if (!(this instanceof ee.Geometry.MultiPoint)) {
     return ee.Geometry.createInstance_(ee.Geometry.MultiPoint, arguments);
   }
-  goog.base(this, ee.Geometry.construct_(
+  ee.Geometry.MultiPoint.base(this, 'constructor', ee.Geometry.construct_(
       ee.Geometry.MultiPoint, 'MultiPoint', 2, arguments));
 };
 goog.inherits(ee.Geometry.MultiPoint, ee.Geometry);
@@ -323,7 +317,7 @@ ee.Geometry.Rectangle = function(coords, opt_proj, opt_geodesic, opt_evenOdd) {
     init['coordinates'] = [[[x1, y2], [x1, y1], [x2, y1], [x2, y2]]];
     init['type'] = 'Polygon';
   }
-  goog.base(this, init);
+  ee.Geometry.Rectangle.base(this, 'constructor', init);
 };
 goog.inherits(ee.Geometry.Rectangle, ee.Geometry);
 
@@ -362,7 +356,7 @@ ee.Geometry.LineString = function(
   if (!(this instanceof ee.Geometry.LineString)) {
     return ee.Geometry.createInstance_(ee.Geometry.LineString, arguments);
   }
-  goog.base(this, ee.Geometry.construct_(
+  ee.Geometry.LineString.base(this, 'constructor', ee.Geometry.construct_(
       ee.Geometry.LineString, 'LineString', 2, arguments));
 };
 goog.inherits(ee.Geometry.LineString, ee.Geometry);
@@ -404,7 +398,7 @@ ee.Geometry.LinearRing = function(
   if (!(this instanceof ee.Geometry.LinearRing)) {
     return ee.Geometry.createInstance_(ee.Geometry.LinearRing, arguments);
   }
-  goog.base(this, ee.Geometry.construct_(
+  ee.Geometry.LinearRing.base(this, 'constructor', ee.Geometry.construct_(
       ee.Geometry.LinearRing, 'LinearRing', 2, arguments));
 };
 goog.inherits(ee.Geometry.LinearRing, ee.Geometry);
@@ -444,7 +438,7 @@ ee.Geometry.MultiLineString = function(
   if (!(this instanceof ee.Geometry.MultiLineString)) {
     return ee.Geometry.createInstance_(ee.Geometry.MultiLineString, arguments);
   }
-  goog.base(this, ee.Geometry.construct_(
+  ee.Geometry.MultiLineString.base(this, 'constructor', ee.Geometry.construct_(
       ee.Geometry.MultiLineString, 'MultiLineString', 3, arguments));
 };
 goog.inherits(ee.Geometry.MultiLineString, ee.Geometry);
@@ -491,7 +485,7 @@ ee.Geometry.Polygon = function(
   if (!(this instanceof ee.Geometry.Polygon)) {
     return ee.Geometry.createInstance_(ee.Geometry.Polygon, arguments);
   }
-  goog.base(this, ee.Geometry.construct_(
+  ee.Geometry.Polygon.base(this, 'constructor', ee.Geometry.construct_(
       ee.Geometry.Polygon, 'Polygon', 3, arguments));
 };
 goog.inherits(ee.Geometry.Polygon, ee.Geometry);
@@ -537,7 +531,7 @@ ee.Geometry.MultiPolygon = function(
   if (!(this instanceof ee.Geometry.MultiPolygon)) {
     return ee.Geometry.createInstance_(ee.Geometry.MultiPolygon, arguments);
   }
-  goog.base(this, ee.Geometry.construct_(
+  ee.Geometry.MultiPolygon.base(this, 'constructor', ee.Geometry.construct_(
       ee.Geometry.MultiPolygon, 'MultiPolygon', 4, arguments));
 };
 goog.inherits(ee.Geometry.MultiPolygon, ee.Geometry);
@@ -570,7 +564,7 @@ ee.Geometry.prototype.encode = function(opt_encoder) {
     result['coordinates'] = this.coordinates_;
   }
 
-  if (goog.isDefAndNotNull(this.proj_)) {
+  if (this.proj_ != null) {
     result['crs'] = {
       'type': 'name',
       'properties': {
@@ -579,11 +573,11 @@ ee.Geometry.prototype.encode = function(opt_encoder) {
     };
   }
 
-  if (goog.isDefAndNotNull(this.geodesic_)) {
+  if (this.geodesic_ != null) {
     result['geodesic'] = this.geodesic_;
   }
 
-  if (goog.isDefAndNotNull(this.evenOdd_)) {
+  if (this.evenOdd_ != null) {
     result['evenOdd'] = this.evenOdd_;
   }
 
@@ -598,7 +592,7 @@ ee.Geometry.prototype.encode = function(opt_encoder) {
 ee.Geometry.prototype.toGeoJSON = function() {
   if (this.func) {
     throw new Error('Can\'t convert a computed Geometry to GeoJSON. ' +
-                    'Use getInfo() instead.');
+                    'Use evaluate() instead.');
   }
   return /** @type {!ee.data.GeoJSONGeometry} */ (this.encode());
 };
@@ -611,7 +605,7 @@ ee.Geometry.prototype.toGeoJSON = function() {
 ee.Geometry.prototype.toGeoJSONString = function() {
   if (this.func) {
     throw new Error('Can\'t convert a computed Geometry to GeoJSON. ' +
-                    'Use getInfo() instead.');
+                    'Use evaluate() instead.');
   }
   return (new goog.json.Serializer()).serialize(this.toGeoJSON());
 };
@@ -630,7 +624,6 @@ ee.Geometry.prototype.serialize = function() {
 ee.Geometry.prototype.toString = function() {
   return 'ee.Geometry(' + this.toGeoJSONString() + ')';
 };
-
 
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -695,7 +688,7 @@ ee.Geometry.isValidCoordinates_ = function(shape) {
   } else {
     // Make sure the coordinates are all numbers.
     for (var i = 0; i < shape.length; i++) {
-      if (!goog.isNumber(shape[i])) {
+      if (typeof shape[i] !== 'number') {
         return -1;
       }
     }
@@ -713,7 +706,7 @@ ee.Geometry.isValidCoordinates_ = function(shape) {
  * @private
  */
 ee.Geometry.coordinatesToLine_ = function(coordinates) {
-  if (!goog.isNumber(coordinates[0])) {
+  if (typeof (coordinates[0]) !== 'number') {
     return /** @type {!Array<!Array<number>>} */ (coordinates);
   }
   if (coordinates.length == 2) {
@@ -752,8 +745,7 @@ ee.Geometry.construct_ = function(
   // Standardize the coordinates and test if they are simple enough for
   // client-side initialization.
   if (ee.Geometry.hasServerValue_(eeArgs['coordinates']) ||
-      goog.isDefAndNotNull(eeArgs['crs']) ||
-      goog.isDefAndNotNull(eeArgs['maxError'])) {
+      eeArgs['crs'] != null || eeArgs['maxError'] != null) {
     // Some arguments cannot be handled in the client, so make a server call.
     // Note we don't declare a default evenOdd value, so the server can infer
     // a default based on the projection.
@@ -770,7 +762,7 @@ ee.Geometry.construct_ = function(
             ['Polygon', 'Rectangle', 'MultiPolygon'],
             apiConstructorName);
 
-    if (isPolygon && !goog.isDefAndNotNull(geoJson['evenOdd'])) {
+    if (isPolygon && geoJson['evenOdd'] == null) {
       // Default to evenOdd=true for any kind of polygon.
       geoJson['evenOdd'] = true;
     }
@@ -801,7 +793,7 @@ ee.Geometry.getEeApiArgs_ = function(jsConstructorFn, originalArgs) {
     // All numbers, so convert them to a true array.
     return {'coordinates': goog.array.toArray(originalArgs)};
   } else {
-    var args = ee.arguments.extract(jsConstructorFn, originalArgs);
+    var args = ee.arguments.extractFromFunction(jsConstructorFn, originalArgs);
     // Convert the argument dictionary to proper GeoJSON. Some of the parameter
     // names intentionally don't map precisely to GeoJSON key names.
     // For example, the server expects different CRS values than GeoJSON.

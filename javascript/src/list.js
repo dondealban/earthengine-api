@@ -13,10 +13,10 @@ goog.require('goog.array');
 /**
  * Constructs a new list.
  *
- * @param {IArrayLike|Object} list A list or a computed object.
- *
+ * @param {!IArrayLike|!Object} list A list or a computed object.
  * @constructor
- * @extends {ee.ComputedObject}
+ * @extends {ee.ComputedObject<!Array<T>>}
+ * @template T
  * @export
  */
 ee.List = function(list) {
@@ -40,10 +40,10 @@ ee.List = function(list) {
   this.list_;
 
   if (goog.isArray(list)) {
-    goog.base(this, null, null);
+    ee.List.base(this, 'constructor', null, null);
     this.list_ = /** @type {IArrayLike} */ (list);
   } else if (list instanceof ee.ComputedObject) {
-    goog.base(this, list.func, list.args, list.varName);
+    ee.List.base(this, 'constructor', list.func, list.args, list.varName);
     this.list_ = null;
   } else {
     throw Error('Invalid argument specified for ee.List(): ' + list);
@@ -79,13 +79,13 @@ ee.List.reset = function() {
 /**
  * @override
  */
-ee.List.prototype.encode = function(opt_encoder) {
+ee.List.prototype.encode = function(encoder) {
   if (goog.isArray(this.list_)) {
     return goog.array.map(this.list_, function(elem) {
-      return opt_encoder(elem);
+      return encoder(elem);
     });
   } else {
-    return goog.base(this, 'encode', opt_encoder);
+    return ee.List.base(this, 'encode', encoder);
   }
 };
 

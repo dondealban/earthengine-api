@@ -68,7 +68,7 @@ ee.Function.prototype.getSignature = goog.abstractMethod;
  * Call the function with the given positional arguments.
  *
  * @param {...*} var_args Positional arguments to pass to the function.
- * @return {ee.ComputedObject} An object representing the called function.
+ * @return {!ee.ComputedObject} An object representing the called function.
  *     If the signature specifies a recognized return type, the returned
  *     value will be cast to that type.
  * @export
@@ -82,14 +82,14 @@ ee.Function.prototype.call = function(var_args) {
  * Call the function with a dictionary of named arguments.
  *
  * @param {Object} namedArgs A dictionary of arguments to the function.
- * @return {ee.ComputedObject} An object representing the lazy result of
+ * @return {!ee.ComputedObject} An object representing the lazy result of
  *     the called function. If the signature specifies a recognized return
  *     type, the returned value will be cast to that type.
  * @export
  */
 ee.Function.prototype.apply = function(namedArgs) {
   var result = new ee.ComputedObject(this, this.promoteArgs(namedArgs));
-  return /** @type {ee.ComputedObject} */(
+  return /** @type {!ee.ComputedObject} */(
       ee.Function.promoter_(result, this.getReturnType()));
 };
 
@@ -100,36 +100,20 @@ ee.Function.prototype.apply = function(namedArgs) {
  *
  * @param {*|undefined} thisValue The "this" value on which the function was
  *     called. If defined, interpreted as the first argument.
- * @param {Array<*>} args A list containing either positional args or a
+ * @param {!Array<*>} args A list containing either positional args or a
  *    keyword arg dictionary.
- * @return {ee.ComputedObject} An object representing the called function.
+ * @return {!ee.ComputedObject} An object representing the called function.
  *     If the signature specifies a recognized return type, the returned
  *     value will be cast to that type.
  * @package
  */
 ee.Function.prototype.callOrApply = function(thisValue, args) {
-  var isInstance = goog.isDef(thisValue);
+  var isInstance = (thisValue !== undefined);
   var signature = this.getSignature();
-
-  // Assume keyword arguments if we get a single dictionary.
-  var useKeywordArgs = false;
-  if (args.length == 1 && ee.Types.isRegularObject(args[0])) {
-    // Decide whether the algorithm expects a dictionary as an only arg.
-    var params = signature['args'];
-    if (isInstance) {
-      params = params.slice(1);
-    }
-    if (params.length) {
-      var requiresOneArg = (params.length == 1 || params[1]['optional']);
-      var aSingleDictionaryIsValid =
-          (requiresOneArg && params[0]['type'] == 'Dictionary');
-      useKeywordArgs = !aSingleDictionaryIsValid;
-    }
-  }
 
   // Convert positional to named args.
   var namedArgs;
-  if (useKeywordArgs) {
+  if (ee.Types.useKeywordArgs(args, signature, isInstance)) {
     namedArgs = goog.object.clone(/** @type {Object} */ (args[0]));
     if (isInstance) {
       var firstArgName = signature['args'][0]['name'];
@@ -164,7 +148,7 @@ ee.Function.prototype.promoteArgs = function(args) {
   var known = {};
   for (var i = 0; i < specs.length; i++) {
     var name = specs[i]['name'];
-    if (name in args && goog.isDef(args[name])) {
+    if (name in args && args[name] !== undefined) {
       promotedArgs[name] = ee.Function.promoter_(args[name], specs[i]['type']);
     } else if (!specs[i]['optional']) {
       throw Error('Required argument (' + name + ') missing to function: ' +
@@ -289,7 +273,10 @@ ee.Function.prototype.serialize = function() {
  *   args: !Array.<ee.data.AlgorithmArgument>,
  *   returns: string,
  *   description: (string|undefined),
- *   deprecated: (string|undefined)
+ *   deprecated: (string|undefined),
+ *   preview: (boolean|undefined)
  * }}
  */
 ee.Function.Signature;
+
+

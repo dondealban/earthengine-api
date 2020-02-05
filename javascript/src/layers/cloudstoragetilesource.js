@@ -2,6 +2,7 @@ goog.provide('ee.layers.CloudStorageTileSource');
 
 goog.require('ee.layers.AbstractTile');
 goog.require('ee.layers.AbstractTileSource');
+goog.require('ee.layers.ImageTile');
 goog.require('goog.string');
 goog.require('goog.string.path');
 
@@ -20,7 +21,7 @@ goog.require('goog.string.path');
  * @ignore
  */
 ee.layers.CloudStorageTileSource = function(bucket, path, maxZoom, opt_suffix) {
-  goog.base(this);
+  ee.layers.CloudStorageTileSource.base(this, 'constructor');
 
   this.bucket_ = bucket;
   this.path_ = path;
@@ -43,17 +44,19 @@ ee.layers.CloudStorageTileSource.prototype.loadTile = function(
         Math.floor(tile.coord.x / zoomFactor),
         Math.floor(tile.coord.y / zoomFactor));
     tile.sourceUrl = this.getTileUrl_(upperCoord, tile.zoom - zoomSteps);
-    tile.renderer = goog.partial(
-        ee.layers.CloudStorageTileSource.zoomTileRenderer_,
-        this.maxZoom_);
+    tile.renderer = /** @type {function(!ee.layers.AbstractTile)} */(
+        goog.partial(
+            ee.layers.CloudStorageTileSource.zoomTileRenderer_, this.maxZoom_));
   }
 
   // If the tile is missing, just show an empty DIV.
   var originalRetryLoad = goog.bind(tile.retryLoad, tile);
   tile.retryLoad = goog.bind(function(opt_errorMessage) {
     if (opt_errorMessage &&
-        goog.string.contains(opt_errorMessage,
-            ee.layers.CloudStorageTileSource.MISSING_TILE_ERROR_)) {
+        (opt_errorMessage.includes(
+             ee.layers.CloudStorageTileSource.MISSING_TILE_ERROR_) ||
+         opt_errorMessage.includes(
+             ee.layers.CloudStorageTileSource.ACCESS_DENIED_ERROR_))) {
       tile.setStatus(ee.layers.AbstractTile.Status.LOADED);
     } else {
       originalRetryLoad(opt_errorMessage);
@@ -79,12 +82,8 @@ ee.layers.CloudStorageTileSource.prototype.getUniqueId = function() {
  */
 ee.layers.CloudStorageTileSource.prototype.getTileUrl_ = function(coord, zoom) {
   var url = goog.string.path.join(
-      ee.layers.CloudStorageTileSource.BASE_URL_,
-      this.bucket_,
-      this.path_,
-      String(zoom),
-      String(coord.x),
-      String(coord.y));
+      ee.layers.CloudStorageTileSource.BASE_URL, this.bucket_, this.path_,
+      String(zoom), String(coord.x), String(coord.y));
   if (this.suffix_) {
     url += this.suffix_;
   }
@@ -96,7 +95,7 @@ ee.layers.CloudStorageTileSource.prototype.getTileUrl_ = function(coord, zoom) {
  * Renders a tile with client-side zooming beyond the maximum zoom level for
  * which full-size tile images are available.
  * @param {number} maxZoom The maximum zoom level at which tiles are available.
- * @param {!ee.layers.AbstractTile} tile The tile to render.
+ * @param {!ee.layers.ImageTile} tile The tile to render.
  * @private
  */
 ee.layers.CloudStorageTileSource.zoomTileRenderer_ = function(maxZoom, tile) {
@@ -127,10 +126,21 @@ ee.layers.CloudStorageTileSource.zoomTileRenderer_ = function(maxZoom, tile) {
 };
 
 
-/** @const @private {string} The Cloud Storage content base URL. */
-ee.layers.CloudStorageTileSource.BASE_URL_ = 'https://storage.googleapis.com';
+/** @const {string} The Cloud Storage content base URL. */
+ee.layers.CloudStorageTileSource.BASE_URL = 'https://storage.googleapis.com';
 
 
-/** @const @private {string} The error message when a tile is missing. */
+/**
+ * @const @private {string} The error message when a tile is missing and the
+ * cloud bucket is world readable. Corresponds to a 404 error.
+ * https://cloud.google.com/iam/docs/overview#allusers
+ */
 ee.layers.CloudStorageTileSource.MISSING_TILE_ERROR_ =
     'The specified key does not exist.';
+
+/**
+ * @const @private {string} The error message when a tile is missing but the
+ * cloud bucket is readable only to "authenticated users." This corresponds to a
+ * 403 error. https://cloud.google.com/iam/docs/overview#allauthenticatedusers.
+ */
+ee.layers.CloudStorageTileSource.ACCESS_DENIED_ERROR_ = 'AccessDenied';

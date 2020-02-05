@@ -9,43 +9,54 @@ Typical use-case consists of:
    'get_credentials_path'
 """
 
+from __future__ import print_function
 
+
+import datetime
 import errno
 import json
 import os
+import sys
+import webbrowser
+import builtins
+import six
+from google.oauth2.credentials import Credentials
+from six.moves.urllib import parse
+from six.moves.urllib import request
+from six.moves.urllib.error import HTTPError
+from time import sleep
 
+
+# Optional imports used for specific shells.
 # pylint: disable=g-import-not-at-top
 try:
-  # Python 3.x
-  import urllib
-  from urllib.parse import urlencode
-  from urllib.error import HTTPError
+  import IPython
 except ImportError:
-  # Python 2.x
-  import urllib
-  from urllib import urlencode
-  import urllib2
-  from urllib2 import HTTPError
+  pass
+
 
 CLIENT_ID = ('517222506229-vsmmajv00ul0bs7p89v5m89qs8eb9359.'
              'apps.googleusercontent.com')
 CLIENT_SECRET = 'RUP0RZ6e0pPhDzsqIJ7KlNd1'
+SCOPES = [
+    'https://www.googleapis.com/auth/earthengine',
+    'https://www.googleapis.com/auth/devstorage.full_control'
+]
 REDIRECT_URI = 'urn:ietf:wg:oauth:2.0:oob'  # Prompts user to copy-paste code
-SCOPE = ('https://www.googleapis.com/auth/earthengine'
-         ' https://www.googleapis.com/auth/devstorage.full_control')
-TOKEN_REQ_URL = 'https://accounts.google.com/o/oauth2/token'
+TOKEN_URI = 'https://accounts.google.com/o/oauth2/token'
 
 
 def get_credentials_path():
-  return os.path.expanduser('~/.config/earthengine/credentials')
+  cred_path = os.path.expanduser('~/.config/earthengine/credentials')
+  return cred_path
 
 
 def get_authorization_url():
   """Returns a URL to generate an auth code."""
 
-  return 'https://accounts.google.com/o/oauth2/auth?' + urlencode({
+  return 'https://accounts.google.com/o/oauth2/auth?' + parse.urlencode({
       'client_id': CLIENT_ID,
-      'scope': SCOPE,
+      'scope': ' '.join(SCOPES),
       'redirect_uri': REDIRECT_URI,
       'response_type': 'code',
   })
@@ -65,16 +76,9 @@ def request_token(auth_code):
   refresh_token = None
 
   try:
-    try:
-      # Python 2.x
-      response = urllib2.urlopen(TOKEN_REQ_URL,
-                                 urllib.urlencode(request_args).encode()
-                                ).read().decode()
-    except NameError:
-      # Python 3.x
-      response = urllib.request.urlopen(TOKEN_REQ_URL,
-                                        urlencode(request_args).encode()
-                                       ).read().decode()
+    response = request.urlopen(
+        TOKEN_URI,
+        parse.urlencode(request_args).encode()).read().decode()
     refresh_token = json.loads(response)['refresh_token']
   except HTTPError as e:
     raise Exception('Problem requesting tokens. Please try again.  %s %s' %
@@ -95,3 +99,142 @@ def write_token(refresh_token):
       raise Exception('Error creating directory %s: %s' % (dirname, e))
 
   json.dump({'refresh_token': refresh_token}, open(credentials_path, 'w'))
+
+
+def _in_colab_shell():
+  """Tests if the code is being executed within Google Colab."""
+  try:
+    import google.colab  # pylint: disable=unused-variable
+    return True
+  except ImportError:
+    return False
+
+
+def _in_jupyter_shell():
+  """Tests if the code is being executed within Jupyter."""
+  try:
+    import ipykernel.zmqshell
+    return isinstance(IPython.get_ipython(),
+                      ipykernel.zmqshell.ZMQInteractiveShell)
+  except ImportError:
+    return False
+  except NameError:
+    return False
+
+
+def _obtain_and_write_token(auth_code=None):
+  """Obtains and writes credentials token based on a authorization code."""
+  if not auth_code:
+    auth_code = builtins.input('Enter verification code: ')
+    assert isinstance(auth_code, six.string_types)
+  token = request_token(auth_code)
+  write_token(token)
+  print('\nSuccessfully saved authorization token.')
+
+
+def _display_auth_instructions_for_noninteractive(auth_url):
+  """Displays instructions for authenticating without blocking for user input."""
+  print('Paste the following address into a web browser:\n'
+        '\n'
+        '    {0}\n'
+        '\n'
+        'On the web page, please authorize access to your '
+        'Earth Engine account and copy the authentication code. '
+        'Next authenticate with the following command:\n'
+        '\n'
+        '    earthengine authenticate '
+        '--authorization-code=PLACE_AUTH_CODE_HERE\n'.format(auth_url))
+
+
+def _display_auth_instructions_with_print(auth_url):
+  """Displays instructions for authenticating using a print statement."""
+  print('To authorize access needed by Earth Engine, open the following '
+        'URL in a web browser and follow the instructions. If the web '
+        'browser does not start automatically, please manually browse the '
+        'URL below.\n'
+        '\n'
+        '    {0}\n'
+        '\n'
+        'The authorization workflow will generate a code, which you '
+        'should paste in the box below. '.format(auth_url))
+
+
+def _display_auth_instructions_with_html(auth_url):
+  """Displays instructions for authenticating using HTML code."""
+  try:
+    IPython.display.display(IPython.display.HTML(
+        """<p>To authorize access needed by Earth Engine, open the following
+        URL in a web browser and follow the instructions:</p>
+        <p><a href={0}>{0}</a></p>
+        <p>The authorization workflow will generate a code, which you
+        should paste in the box below</p>
+        """.format(auth_url)))
+  except NameError:
+    print('The IPython module must be installed to use HTML.')
+    raise
+
+
+def authenticate(
+    authorization_code=None,
+    quiet=False):
+  """Prompts the user to authorize access to Earth Engine via OAuth2.
+
+  Args:
+    authorization_code: An optional authorization code.
+    quiet: If true, do not require interactive prompts.
+  """
+
+  if authorization_code:
+    _obtain_and_write_token(authorization_code)
+    return
+
+  auth_url = get_authorization_url()
+
+  if quiet:
+    _display_auth_instructions_for_noninteractive(auth_url)
+    webbrowser.open_new(auth_url)
+    return
+
+  if _in_colab_shell():
+    if sys.version_info[0] == 2:  # Python 2
+      _display_auth_instructions_for_noninteractive(auth_url)
+      return
+    else:  # Python 3
+      _display_auth_instructions_with_print(auth_url)
+  elif _in_jupyter_shell():
+    _display_auth_instructions_with_html(auth_url)
+  else:
+    _display_auth_instructions_with_print(auth_url)
+  webbrowser.open_new(auth_url)
+
+  auth_code = builtins.input('Enter verification code: ')
+  assert isinstance(auth_code, six.string_types)
+  _obtain_and_write_token(auth_code.strip())
+
+
+
+class AccessTokenCredentials(Credentials):
+    def __init__(self, credentials_path=get_credentials_path()):
+        self.credentials_path = credentials_path
+        super(AccessTokenCredentials, self).__init__(self._read_access_token(credentials_path))
+
+    @staticmethod
+    def create(credentials_path=get_credentials_path()):
+        if os.path.exists(credentials_path) and AccessTokenCredentials._read_access_token(credentials_path):
+            return AccessTokenCredentials(credentials_path)
+        else:
+            return None
+
+    @staticmethod
+    def _read_access_token(credentials_path):
+        for i in range(5):
+            try:
+                return json.load(open(credentials_path)).get('access_token')
+            except:
+                sleep(5)
+
+    def refresh(self, request):
+        self.token = self._read_access_token(self.credentials_path)
+
+    def __str__(self):
+        return 'AccessTokenCredentials({})'.format(get_credentials_path())

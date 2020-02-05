@@ -11,7 +11,10 @@ goog.require('ee.Image');
 goog.require('ee.List');
 goog.require('ee.Types');
 goog.require('ee.arguments');
+goog.require('ee.data');
+goog.require('ee.data.images');
 goog.require('goog.array');
+goog.require('goog.string');
 
 
 
@@ -50,24 +53,24 @@ ee.ImageCollection = function(args) {
 
   if (ee.Types.isString(args)) {
     // An ID.
-    goog.base(this, new ee.ApiFunction('ImageCollection.load'), {
+    ee.ImageCollection.base(this, 'constructor', new ee.ApiFunction('ImageCollection.load'), {
       'id': args
     });
   } else if (goog.isArray(args)) {
     // A list of images.
-    goog.base(this, new ee.ApiFunction('ImageCollection.fromImages'), {
+    ee.ImageCollection.base(this, 'constructor', new ee.ApiFunction('ImageCollection.fromImages'), {
       'images': goog.array.map(args, function(elem) {
         return new ee.Image(elem);
       })
     });
   } else if (args instanceof ee.List) {
     // A computed list of image. This can't get the extra ee.Image().
-    goog.base(this, new ee.ApiFunction('ImageCollection.fromImages'), {
+    ee.ImageCollection.base(this, 'constructor', new ee.ApiFunction('ImageCollection.fromImages'), {
       'images': args
     });
   } else if (args instanceof ee.ComputedObject) {
     // A custom object to reinterpret as an ImageCollection.
-    goog.base(this, args.func, args.args, args.varName);
+    ee.ImageCollection.base(this, 'constructor', args.func, args.args, args.varName);
   } else {
     throw Error('Unrecognized argument type to convert to an ' +
                 'ImageCollection: ' + args);
@@ -113,17 +116,19 @@ ee.ImageCollection.reset = function() {
  * This mosaics the collection to a single image and return a mapid suitable
  * for building a Google Maps overlay.
  *
- * @param {Object?=} opt_visParams The visualization parameters.
- * @param {function(Object, string=)=} opt_callback An async callback.
+ * @param {?Object=} opt_visParams The visualization parameters.
+ * @param {function(!Object, string=)=} opt_callback An async callback.
  *     If not supplied, the call is made synchronously.
- * @return {ee.data.MapId|undefined} Returns a mapid and token, or undefined if
+ * @return {!ee.data.MapId|undefined} Returns a mapid and optional token, which
+ *     may be passed to ee.data.getTileUrl or ui.Map.addLayer. Undefined if
  *     a callback was specified.
  * @export
  */
 ee.ImageCollection.prototype.getMap = function(opt_visParams, opt_callback) {
-  var args = ee.arguments.extract(
+  var args = ee.arguments.extractFromFunction(
       ee.ImageCollection.prototype.getMap, arguments);
-  var mosaic = ee.ApiFunction._call('ImageCollection.mosaic', this);
+  var mosaic = /** @type {!ee.Image} */(
+      ee.ApiFunction._call('ImageCollection.mosaic', this));
   if (args['callback']) {
     mosaic.getMap(args['visParams'], args['callback']);
   } else {
@@ -136,11 +141,11 @@ ee.ImageCollection.prototype.getMap = function(opt_visParams, opt_callback) {
  * An imperative function that returns all the known information about this
  * collection via an AJAX call.
  *
- * @param {function(ee.data.ImageCollectionDescription, string=)=} opt_callback
+ * @param {function(!ee.data.ImageCollectionDescription, string=)=} opt_callback
  *     An optional callback. If not supplied, the call is made synchronously.
  *     If supplied, will be called with the first parameter if successful and
  *     the second if unsuccessful.
- * @return {ee.data.ImageCollectionDescription} A collection description
+ * @return {!ee.data.ImageCollectionDescription} A collection description
  *     whose fields include:
  *     - features: a list containing metadata about the images in the
  *           collection.
@@ -151,26 +156,37 @@ ee.ImageCollection.prototype.getMap = function(opt_visParams, opt_callback) {
  * @export
  */
 ee.ImageCollection.prototype.getInfo = function(opt_callback) {
-  return /** @type {ee.data.ImageCollectionDescription} */(
-      goog.base(this, 'getInfo', opt_callback));
+  return /** @type {!ee.data.ImageCollectionDescription} */(
+      ee.ImageCollection.base(this, 'getInfo', opt_callback));
 };
 
 
 /**
  * Select bands from each image in a collection.
  *
- * @param {Array.<string|number>} selectors A list of names,
- *     regexes or numeric indicies specifying the bands to select.
- * @param {Array.<string>=} opt_names A list of new names for the output bands.
+ * @param {!Array.<string|number>} selectors A list of names,
+ *     regexes or numeric indices specifying the bands to select.
+ * @param {!Array.<string>=} opt_names A list of new names for the output bands.
  *     Must match the number of bands selected.
- * @return {ee.ImageCollection} The image collection with selected bands.
+ * @return {!ee.ImageCollection} The image collection with selected bands.
  * @export
  */
 ee.ImageCollection.prototype.select = function(selectors, opt_names) {
   var varargs = arguments;
-  return /** @type {ee.ImageCollection} */ (this.map(function(img) {
+  return /** @type {!ee.ImageCollection} */(this.map(function(obj) {
+    var img = /** @type {!ee.Image} */(obj);
     return img.select.apply(img, varargs);
   }));
+};
+
+/**
+ * Returns the first entry from a given collection.
+ *
+ * @return {ee.Image} The collection from which to select the first entry.
+ * @export
+ */
+ee.ImageCollection.prototype.first = function() {
+  return new ee.Image(ee.ApiFunction._call('Collection.first', this));
 };
 
 

@@ -11,11 +11,13 @@ goog.provide('ee.Filter');
 
 goog.require('ee.ApiFunction');
 goog.require('ee.ComputedObject');
+goog.require('ee.Geometry');
 goog.require('ee.arguments');
 goog.require('goog.array');
 goog.require('goog.string');
 
 
+goog.forwardDeclare('ee.FeatureCollection');
 
 /**
  * Constructs a new filter. This constructor accepts the following args:
@@ -56,20 +58,20 @@ ee.Filter = function(opt_filter) {
       return new ee.Filter(opt_filter[0]);
     } else {
       // AND filters together.
-      goog.base(this, new ee.ApiFunction('Filter.and'), {
+      ee.Filter.base(this, 'constructor', new ee.ApiFunction('Filter.and'), {
         'filters': opt_filter
       });
       this.filter_ = opt_filter;
     }
   } else if (opt_filter instanceof ee.ComputedObject) {
     // Actual filter object.
-    goog.base(this, opt_filter.func, opt_filter.args, opt_filter.varName);
+    ee.Filter.base(this, 'constructor', opt_filter.func, opt_filter.args, opt_filter.varName);
     this.filter_ = [opt_filter];
-  } else if (!goog.isDef(opt_filter)) {
+  } else if (opt_filter === undefined) {
     // A silly call with no arguments left for backward-compatibility.
     // Encoding such a filter is expected to fail, but it can be composed
     // by calling the various methods that end up in append_().
-    goog.base(this, null, null);
+    ee.Filter.base(this, 'constructor', null, null);
     this.filter_ = [];
   } else {
     throw Error('Invalid argument specified for ee.Filter(): ' + opt_filter);
@@ -146,8 +148,8 @@ ee.Filter.prototype.append_ = function(newFilter) {
 
 
 /**
- * Returns the opposite of this filter, i.e. a filter that will match iff
- * this filter doesn't.
+ * Returns the opposite of this filter, i.e. a filter that will match if and
+ * only if this filter doesn't.
  * @return {ee.Filter} The negated filter.
  * @export
  */
@@ -165,7 +167,7 @@ ee.Filter.prototype.not = function() {
  * @export
  */
 ee.Filter.eq = function(name, value) {
-  var args = ee.arguments.extract(ee.Filter.eq, arguments);
+  var args = ee.arguments.extractFromFunction(ee.Filter.eq, arguments);
   return /** @type {ee.Filter} */(
       ee.ApiFunction._call('Filter.equals', args['name'], args['value']));
 };
@@ -180,7 +182,7 @@ ee.Filter.eq = function(name, value) {
  * @export
  */
 ee.Filter.neq = function(name, value) {
-  var args = ee.arguments.extract(ee.Filter.neq, arguments);
+  var args = ee.arguments.extractFromFunction(ee.Filter.neq, arguments);
   return ee.Filter.eq(args['name'], args['value']).not();
 };
 
@@ -194,7 +196,7 @@ ee.Filter.neq = function(name, value) {
  * @export
  */
 ee.Filter.lt = function(name, value) {
-  var args = ee.arguments.extract(ee.Filter.lt, arguments);
+  var args = ee.arguments.extractFromFunction(ee.Filter.lt, arguments);
   return /** @type {ee.Filter} */(
       ee.ApiFunction._call('Filter.lessThan', args['name'], args['value']));
 };
@@ -209,7 +211,7 @@ ee.Filter.lt = function(name, value) {
  * @export
  */
 ee.Filter.gte = function(name, value) {
-  var args = ee.arguments.extract(ee.Filter.gte, arguments);
+  var args = ee.arguments.extractFromFunction(ee.Filter.gte, arguments);
   return ee.Filter.lt(args['name'], args['value']).not();
 };
 
@@ -223,7 +225,7 @@ ee.Filter.gte = function(name, value) {
  * @export
  */
 ee.Filter.gt = function(name, value) {
-  var args = ee.arguments.extract(ee.Filter.gt, arguments);
+  var args = ee.arguments.extractFromFunction(ee.Filter.gt, arguments);
   return /** @type {ee.Filter} */(
       ee.ApiFunction._call('Filter.greaterThan', args['name'], args['value']));
 };
@@ -238,7 +240,7 @@ ee.Filter.gt = function(name, value) {
  * @export
  */
 ee.Filter.lte = function(name, value) {
-  var args = ee.arguments.extract(ee.Filter.lte, arguments);
+  var args = ee.arguments.extractFromFunction(ee.Filter.lte, arguments);
   return ee.Filter.gt(args['name'], args['value']).not();
 };
 
@@ -272,7 +274,7 @@ ee.Filter.or = function(var_args) {
 /**
  * Filter images by date. The start and end may be a Date, numbers
  * (interpreted as milliseconds since 1970-01-01T00:00:00Z), or strings (such
- * as '1996-01-01T08:00').
+ * as '1996-01-01T08:00'). Based on 'system:time_start'.
  *
  * @param {Date|string|number} start The inclusive start date.
  * @param {Date|string|number=} opt_end The optional exclusive end date. If not
@@ -281,7 +283,7 @@ ee.Filter.or = function(var_args) {
  * @export
  */
 ee.Filter.date = function(start, opt_end) {
-  var args = ee.arguments.extract(ee.Filter.date, arguments);
+  var args = ee.arguments.extractFromFunction(ee.Filter.date, arguments);
   var range = ee.ApiFunction._call('DateRange', args['start'], args['end']);
   var filter = ee.ApiFunction._apply('Filter.dateRangeContains', {
     'leftValue': range,
@@ -307,7 +309,7 @@ ee.Filter.date = function(start, opt_end) {
  */
 ee.Filter.inList = function(
     opt_leftField, opt_rightValue, opt_rightField, opt_leftValue) {
-  var args = ee.arguments.extract(ee.Filter.inList, arguments);
+  var args = ee.arguments.extractFromFunction(ee.Filter.inList, arguments);
   // Implement this in terms of listContains, with the arguments switched.
   // In listContains the list is on the left side, while in inList it's on
   // the right.
@@ -322,20 +324,21 @@ ee.Filter.inList = function(
 
 
 /**
- * Filter on bounds.
+ * Creates a filter that passes if the object's geometry intersects the
+ * given geometry.
  *
- * @param {ee.Geometry|ee.ComputedObject|ee.FeatureCollection} geometry
- *     The geometry, feature or collection to filter to.
- * @param {number|ee.ComputedObject=} opt_errorMargin An optional error margin.
+ * @param {!ee.Geometry|!ee.ComputedObject|!ee.FeatureCollection} geometry
+ *     The geometry, feature or collection to intersect with.
+ * @param {number|!ee.ComputedObject=} opt_errorMargin An optional error margin.
  *     If a number, interpreted as sphere surface meters.
- * @return {ee.Filter} The modified filter.
+ * @return {!ee.Filter} The constructed filter.
  * @export
  */
 ee.Filter.bounds = function(geometry, opt_errorMargin) {
   // Invoke geometry promotion then manually promote to a Feature.
   // TODO(user): Discuss whether filters should go back to working
   //              directly on geometries.
-  return /** @type {ee.Filter} */ (
+  return /** @type {!ee.Filter} */ (
       ee.ApiFunction._apply('Filter.intersects', {
         'leftField': '.all',
         'rightValue': ee.ApiFunction._call('Feature', geometry),

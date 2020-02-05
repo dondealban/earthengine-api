@@ -25,13 +25,13 @@ goog.require('goog.object');
 /**
  * Creates a function defined by the EE API.
  * @param {string} name The name of the function.
- * @param {ee.Function.Signature=} opt_signature
+ * @param {!ee.Function.Signature|!ee.data.AlgorithmSignature=} opt_signature
  *     The signature of the function. If unspecified, looked up dynamically.
  * @constructor
  * @extends {ee.Function}
  */
 ee.ApiFunction = function(name, opt_signature) {
-  if (!goog.isDef(opt_signature)) {
+  if (opt_signature === undefined) {
     return ee.ApiFunction.lookup(name);
   } else if (!(this instanceof ee.ApiFunction)) {
     return ee.ComputedObject.construct(ee.ApiFunction, arguments);
@@ -39,10 +39,10 @@ ee.ApiFunction = function(name, opt_signature) {
 
   /**
    * The signature of this API function.
-   * @type {ee.Function.Signature}
+   * @type {!ee.Function.Signature}
    * @private
    */
-  this.signature_ = /** @type {ee.Function.Signature} */(
+  this.signature_ = /** @type {!ee.Function.Signature} */ (
       goog.object.unsafeClone(opt_signature));
   this.signature_['name'] = name;
 };
@@ -56,7 +56,7 @@ goog.exportSymbol('ee.ApiFunction', ee.ApiFunction);
  *
  * @param {string} name The name of the API function to call.
  * @param {...*} var_args Positional arguments to pass to the function.
- * @return {ee.ComputedObject} An object representing the called function.
+ * @return {!ee.ComputedObject} An object representing the called function.
  *     If the signature specifies a recognized return type, the returned
  *     value will be cast to that type.
  * @export
@@ -71,8 +71,8 @@ ee.ApiFunction._call = function(name, var_args) {
  * Call a named API function with a dictionary of named arguments.
  *
  * @param {string} name The name of the API function to call.
- * @param {Object} namedArgs A dictionary of arguments to the function.
- * @return {ee.ComputedObject} An object representing the called function.
+ * @param {!Object} namedArgs A dictionary of arguments to the function.
+ * @return {!ee.ComputedObject} An object representing the called function.
  *     If the signature specifies a recognized return type, the returned
  *     value will be cast to that type.
  * @export
@@ -97,7 +97,7 @@ ee.ApiFunction.prototype.getSignature = function() {
 /**
  * A dictionary of functions defined by the API server.
  *
- * @type {Object.<ee.ApiFunction>}
+ * @type {?Object.<!ee.ApiFunction>}
  * @private
  */
 ee.ApiFunction.api_ = null;
@@ -107,14 +107,14 @@ ee.ApiFunction.api_ = null;
  * A set of algorithm names containing all algorithms that have been bound to
  * a function so far using importApi().
  *
- * @type {Object.<boolean>}
+ * @type {!Object.<boolean>}
  * @private
  */
 ee.ApiFunction.boundSignatures_ = {};
 
 
 /**
- * @return {Object.<ee.Function.Signature>} A map from the name to signature
+ * @return {!Object.<!ee.Function.Signature>} A map from the name to signature
  *     for all API functions.
  */
 ee.ApiFunction.allSignatures = function() {
@@ -142,7 +142,7 @@ ee.ApiFunction.unboundFunctions = function() {
  * Looks up an API function by name.
  *
  * @param {string} name The name of the function to get.
- * @return {ee.ApiFunction} The requested function.
+ * @return {!ee.ApiFunction} The requested function.
  * @export
  */
 ee.ApiFunction.lookup = function(name) {
@@ -158,7 +158,7 @@ ee.ApiFunction.lookup = function(name) {
  * Looks up an API function by name, but doesn't throw an error.
  *
  * @param {string} name The name of the function to get.
- * @return {ee.ApiFunction} The requested function or null if it's not found.
+ * @return {!ee.ApiFunction} The requested function or null if it's not found.
  */
 ee.ApiFunction.lookupInternal = function(name) {
   ee.ApiFunction.initialize();
@@ -171,13 +171,13 @@ ee.ApiFunction.lookupInternal = function(name) {
  *
  * @param {function()=} opt_successCallback An optional success callback.
  *     If not supplied, the call is made synchronously.
- * @param {function(Error)=} opt_failureCallback An optional failure callback.
+ * @param {function(!Error)=} opt_failureCallback An optional failure callback.
  *     Only valid if opt_successCallback is specified.
  */
 ee.ApiFunction.initialize = function(opt_successCallback, opt_failureCallback) {
   if (!ee.ApiFunction.api_) {
     /**
-     * @param {ee.data.AlgorithmsRegistry} data
+     * @param {?ee.data.AlgorithmsRegistry} data
      * @param {string=} opt_error
      */
     var callback = function(data, opt_error) {
@@ -190,19 +190,19 @@ ee.ApiFunction.initialize = function(opt_successCallback, opt_failureCallback) {
 
       ee.ApiFunction.api_ = goog.object.map(data, function(sig, name) {
         // Strip type parameters.
-        sig['returns'] = sig['returns'].replace(/<.*>/, '');
-        for (var i = 0; i < sig['args'].length; i++) {
-          sig['args'][i]['type'] = sig['args'][i]['type'].replace(/<.*>/, '');
+        sig.returns = sig.returns.replace(/<.*>/, '');
+        for (var i = 0; i < sig.args.length; i++) {
+          sig.args[i].type = sig.args[i].type.replace(/<.*>/, '');
         }
-        return new ee.ApiFunction(
-            name, /** @type {ee.Function.Signature} */(sig));
+        return new ee.ApiFunction(name, sig);
       });
       if (opt_successCallback) opt_successCallback();
     };
     if (opt_successCallback) {
       ee.data.getAlgorithms(callback);
     } else {
-      callback(ee.data.getAlgorithms());
+      callback(
+          /** @type {!ee.data.AlgorithmsRegistry} */ (ee.data.getAlgorithms()));
     }
   } else if (opt_successCallback) {
     // The API signatures have previously been initialized by some
@@ -224,7 +224,7 @@ ee.ApiFunction.reset = function() {
 /**
  * Adds all API functions that begin with a given prefix to a target class.
  *
- * @param {Function|Object} target The class to add to.
+ * @param {!Function|!Object} target The class to add to.
  * @param {string} prefix The prefix to search for in the signatures.
  * @param {string} typeName The name of the object's type. Functions whose
  *     first argument matches this type are bound as instance methods, and
@@ -251,7 +251,9 @@ ee.ApiFunction.importApi = function(target, prefix, typeName, opt_prepend) {
         isInstance = firstArgType != 'Object' &&
                      ee.Types.isSubtype(firstArgType, typeName);
       }
-      var destination = isInstance ? target.prototype : target;
+      // Assume we have a constructor Function if we get an instance method.
+      var destination =
+          isInstance ? /** @type {!Function} */(target).prototype : target;
 
       if (fname in destination && !destination[fname]['signature']) {
         // Don't overwrite client-defined functions.
@@ -259,6 +261,11 @@ ee.ApiFunction.importApi = function(target, prefix, typeName, opt_prepend) {
       }
 
       // Add the actual function
+      /**
+       * @param {*} var_args
+       * @return {!ee.ComputedObject}
+       * @this {*}
+       **/
       destination[fname] = function(var_args) {
         return apiFunc.callOrApply(
             isInstance ? this : undefined,
@@ -276,7 +283,7 @@ ee.ApiFunction.importApi = function(target, prefix, typeName, opt_prepend) {
 
 /**
  * Removes all methods added by importApi() from a target class.
- * @param {Function|Object} target The class to remove from.
+ * @param {!Function|!Object} target The class to remove from.
  */
 ee.ApiFunction.clearApi = function(target) {
   var clear = function(target) {
@@ -287,5 +294,5 @@ ee.ApiFunction.clearApi = function(target) {
     }
   };
   clear(target);
-  clear(target.prototype);
+  clear(/** @type {!Function} */ (target).prototype || {});
 };

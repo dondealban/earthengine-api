@@ -4,6 +4,7 @@ goog.provide('ee.layers.TileFailEvent');
 goog.provide('ee.layers.TileLoadEvent');
 goog.provide('ee.layers.TileThrottleEvent');
 
+goog.require('ee.layers.AbstractOverlayStats');
 goog.require('goog.array');
 goog.require('goog.events');
 goog.require('goog.events.Event');
@@ -18,7 +19,6 @@ goog.require('goog.structs.Map');
 goog.require('goog.style');
 
 goog.forwardDeclare('ee.data.Profiler');
-
 
 
 /**
@@ -38,7 +38,7 @@ goog.forwardDeclare('ee.data.Profiler');
  * @ignore
  */
 ee.layers.AbstractOverlay = function(tileSource, opt_options) {
-  goog.base(this);
+  ee.layers.AbstractOverlay.base(this, 'constructor');
 
   // Public options required by the Maps API.
 
@@ -57,6 +57,9 @@ ee.layers.AbstractOverlay = function(tileSource, opt_options) {
 
   // Protected internal members.
 
+  /** @protected {!ee.layers.AbstractOverlayStats} */
+  this.stats = new ee.layers.AbstractOverlayStats(tileSource.getUniqueId());
+
   /** @protected {goog.structs.Map<string, ee.layers.AbstractTile>} */
   this.tilesById = new goog.structs.Map();
 
@@ -71,9 +74,9 @@ ee.layers.AbstractOverlay = function(tileSource, opt_options) {
 
   // MapType options required by the compiler but which we don't support.
 
-  this.projection = undefined;
-  this.radius = undefined;
-  this.alt = undefined;
+  this.projection = null;
+  this.radius = 0;
+  this.alt = null;
 };
 goog.inherits(ee.layers.AbstractOverlay, goog.events.EventTarget);
 
@@ -153,6 +156,13 @@ ee.layers.AbstractOverlay.prototype.setOpacity = function(opacity) {
   }, this);
 };
 
+/**
+ * @return {!ee.layers.AbstractOverlayStats} The stats for the layer
+ */
+ee.layers.AbstractOverlay.prototype.getStats = function() {
+  return this.stats;
+};
+
 
 // Interface for the Google Maps API.
 
@@ -182,25 +192,7 @@ ee.layers.AbstractOverlay.prototype.getTile = function(
   this.tilesById.set(uniqueId, tile);
 
   // Notify listeners when the tile has loaded.
-  this.handler.listen(
-      tile, ee.layers.AbstractTile.EventType.STATUS_CHANGED, function() {
-        var Status = ee.layers.AbstractTile.Status;
-
-        switch (tile.getStatus()) {
-          case Status.LOADED:
-            this.dispatchEvent(
-                new ee.layers.TileLoadEvent(this.getLoadingTilesCount()));
-            break;
-          case Status.THROTTLED:
-            this.dispatchEvent(new ee.layers.TileThrottleEvent(tile.sourceUrl));
-            break;
-          case Status.FAILED:
-            this.dispatchEvent(new ee.layers.TileFailEvent(
-                tile.sourceUrl, tile.errorMessage_));
-            break;
-        }
-      });
-
+  this.registerStatusChangeListener_(tile);
 
   // Use the current time in seconds as the priority for the tile
   // loading queue. Smaller priorities move to the front of the queue,
@@ -230,7 +222,37 @@ ee.layers.AbstractOverlay.prototype.releaseTile = function(tileDiv) {
 
 
 // Internals.
+/**
+ * Listen for tile status changes and respond accordingly.
+ * @param {ee.layers.AbstractTile} tile
+ * @private
+ */
+ee.layers.AbstractOverlay.prototype.registerStatusChangeListener_ =
+    function(tile) {
+  // Notify listeners when the tile has loaded.
+  this.handler.listen(
+      tile, ee.layers.AbstractTile.EventType.STATUS_CHANGED, function() {
+        var Status = ee.layers.AbstractTile.Status;
 
+        switch (tile.getStatus()) {
+          case Status.LOADED:
+            const endTs = new Date().getTime();
+            this.stats.addTileStats(tile.loadingStartTs_, endTs, tile.zoom);
+            this.dispatchEvent(
+                new ee.layers.TileLoadEvent(this.getLoadingTilesCount()));
+            break;
+          case Status.THROTTLED:
+            this.stats.incrementThrottleCounter(tile.zoom);
+            this.dispatchEvent(new ee.layers.TileThrottleEvent(tile.sourceUrl));
+            break;
+          case Status.FAILED:
+            this.stats.incrementErrorCounter(tile.zoom);
+            this.dispatchEvent(new ee.layers.TileFailEvent(
+                tile.sourceUrl, tile.errorMessage_));
+            break;
+        }
+      });
+};
 
 /**
  * Factory method to create a tile for this overlay.
@@ -260,7 +282,7 @@ ee.layers.AbstractOverlay.prototype.createTile = goog.abstractMethod;
  * @private
  */
 ee.layers.AbstractOverlay.prototype.getUniqueTileId_ = function(coord, z) {
-  var tileId = [coord.x, coord.y, z, this.tileCounter].join('-');
+  var tileId = [coord.x, coord.y, z, this.tileCounter++].join('-');
   var sourceId = this.tileSource.getUniqueId();
   return [tileId, sourceId].join('-');
 };
@@ -268,7 +290,7 @@ ee.layers.AbstractOverlay.prototype.getUniqueTileId_ = function(coord, z) {
 
 /** @override */
 ee.layers.AbstractOverlay.prototype.disposeInternal = function() {
-  goog.base(this, 'disposeInternal');
+  ee.layers.AbstractOverlay.base(this, 'disposeInternal');
   this.tilesById.forEach(goog.dispose);
   this.tilesById.clear();
   this.tilesById = null;
@@ -370,7 +392,7 @@ goog.inherits(ee.layers.TileFailEvent, goog.events.Event);
  * @ignore
  */
 ee.layers.AbstractTile = function(coord, zoom, ownerDocument, uniqueId) {
-  goog.base(this);
+  ee.layers.AbstractTile.base(this, 'constructor');
 
   /** @package @const {!google.maps.Point} The position of the tile. */
   this.coord = coord;
@@ -420,6 +442,12 @@ ee.layers.AbstractTile = function(coord, zoom, ownerDocument, uniqueId) {
    * @private {string|undefined}
    */
   this.errorMessage_;
+
+  /**
+   * Loading start time.
+   * @private {number}
+   */
+  this.loadingStartTs_;
 };
 goog.inherits(ee.layers.AbstractTile, goog.events.EventTarget);
 
@@ -466,6 +494,7 @@ ee.layers.AbstractTile.prototype.startLoad = function() {
         'Use retryLoad() after the first attempt.');
   }
   this.setStatus(ee.layers.AbstractTile.Status.LOADING);
+  this.loadingStartTs_ = new Date().getTime();
 
   this.xhrIo_ = new goog.net.XhrIo();
   this.xhrIo_.setResponseType(goog.net.XhrIo.ResponseType.BLOB);
@@ -500,6 +529,7 @@ ee.layers.AbstractTile.prototype.startLoad = function() {
   }, false, this);
   this.xhrIo_.listenOnce(
       goog.net.EventType.READY, goog.partial(goog.dispose, this.xhrIo_));
+
   this.xhrIo_.send(this.sourceUrl, 'GET');
 };
 
@@ -604,7 +634,7 @@ ee.layers.AbstractTile.DONE_STATUS_SET_ = goog.object.createSet(
 
 /** @override */
 ee.layers.AbstractTile.prototype.disposeInternal = function() {
-  goog.base(this, 'disposeInternal');
+  ee.layers.AbstractTile.base(this, 'disposeInternal');
   this.cancelLoad();
   this.div.remove();
   this.renderer = null;

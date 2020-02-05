@@ -44,7 +44,7 @@ ee.Date = function(date, opt_tz) {
 
   ee.Date.initialize();
 
-  var jsArgs = ee.arguments.extract(ee.Date, arguments);
+  var jsArgs = ee.arguments.extractFromFunction(ee.Date, arguments);
   date = jsArgs['date'];
   var tz = jsArgs['tz'];
 
@@ -77,7 +77,7 @@ ee.Date = function(date, opt_tz) {
   } else {
     throw Error('Invalid argument specified for ee.Date(): ' + date);
   }
-  goog.base(this, func, args, varName);
+  ee.Date.base(this, 'constructor', func, args, varName);
 };
 goog.inherits(ee.Date, ee.ComputedObject);
 

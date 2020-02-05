@@ -22,7 +22,7 @@ goog.require('ee.arguments');
  * @extends {ee.Element}
  */
 ee.Collection = function(func, args, opt_varName) {
-  goog.base(this, func, args, opt_varName);
+  ee.Collection.base(this, 'constructor', func, args, opt_varName);
   ee.Collection.initialize();
 };
 goog.inherits(ee.Collection, ee.Element);
@@ -66,22 +66,19 @@ ee.Collection.reset = function() {
 /**
  * Apply a filter to this collection.
  *
- * Collection filtering is done by wrapping a collection in a filter
- * algorithm.  As additional filters are applied to a collection, we
- * try to avoid adding more wrappers and instead search for a wrapper
- * we can add to, however if the collection doesn't have a filter, this
- * will wrap it in one.
- *
- * @param {ee.Filter} newFilter A filter to add to this collection.
+ * @param {ee.Filter} filter A filter to apply to this collection.
  * @return {ee.Collection} The filtered collection.
  * @export
  */
-ee.Collection.prototype.filter = function(newFilter) {
-  if (!newFilter) {
+ee.Collection.prototype.filter = function(filter) {
+  var args = ee.arguments.extractFromFunction(
+      ee.Collection.prototype.filter, arguments);
+  filter = args['filter'];
+  if (!filter) {
     throw new Error('Empty filters.');
   }
   return this.castInternal(ee.ApiFunction._call(
-      'Collection.filter', this, newFilter));
+      'Collection.filter', this, filter));
 };
 
 
@@ -102,7 +99,7 @@ ee.Collection.prototype.filter = function(newFilter) {
  * TODO(user): Decide whether to deprecate this.
  */
 ee.Collection.prototype.filterMetadata = function(name, operator, value) {
-  var args = ee.arguments.extract(
+  var args = ee.arguments.extractFromFunction(
       ee.Collection.prototype.filterMetadata, arguments);
   return this.filter(ee.Filter.metadata(
       args['name'], args['operator'], args['value']));
@@ -110,12 +107,12 @@ ee.Collection.prototype.filterMetadata = function(name, operator, value) {
 
 
 /**
- * Shortcut to filter a collection by geometry.  Items in the
- * collection with a footprint that fails to intersect the bounds
- * will be excluded when the collection is evaluated.
+ * Shortcut to filter a collection by intersection with geometry.  Items in the
+ * collection with a footprint that fails to intersect the given geometry
+ * will be excluded.
  *
  * This is equivalent to this.filter(ee.Filter.bounds(...)).
- * @param {ee.Feature|ee.Geometry} geometry The geometry to filter to.
+ * @param {!ee.Feature|!ee.Geometry} geometry The geometry to filter to.
  * @return {ee.Collection} The filtered collection.
  * @export
  */
@@ -139,7 +136,7 @@ ee.Collection.prototype.filterBounds = function(geometry) {
  * @export
  */
 ee.Collection.prototype.filterDate = function(start, opt_end) {
-  var args = ee.arguments.extract(
+  var args = ee.arguments.extractFromFunction(
       ee.Collection.prototype.filterDate, arguments);
   return this.filter(ee.Filter.date(args['start'], args['end']));
 };
@@ -157,7 +154,8 @@ ee.Collection.prototype.filterDate = function(start, opt_end) {
  * @export
  */
 ee.Collection.prototype.limit = function(max, opt_property, opt_ascending) {
-  var args = ee.arguments.extract(ee.Collection.prototype.limit, arguments);
+  var args = ee.arguments.extractFromFunction(
+      ee.Collection.prototype.limit, arguments);
   return this.castInternal(ee.ApiFunction._call(
       'Collection.limit', this,
       args['max'], args['property'], args['ascending']));
@@ -174,7 +172,8 @@ ee.Collection.prototype.limit = function(max, opt_property, opt_ascending) {
  * @export
  */
 ee.Collection.prototype.sort = function(property, opt_ascending) {
-  var args = ee.arguments.extract(ee.Collection.prototype.sort, arguments);
+  var args = ee.arguments.extractFromFunction(
+      ee.Collection.prototype.sort, arguments);
   return this.castInternal(ee.ApiFunction._call(
       'Collection.limit', this,
       undefined, args['property'], args['ascending']));
@@ -234,7 +233,7 @@ ee.Collection.prototype.map = function(algorithm, opt_dropNulls) {
  * @export
  */
 ee.Collection.prototype.iterate = function(algorithm, opt_first) {
-  var first = goog.isDef(opt_first) ? opt_first : null;
+  var first = (opt_first !== undefined) ? opt_first : null;
   var elementType = this.elementType();
   var withCast = function(e, p) { return algorithm(new elementType(e), p); };
   return ee.ApiFunction._call('Collection.iterate', this, withCast, first);

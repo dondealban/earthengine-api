@@ -94,8 +94,11 @@ class ApiFunction(function.Function):
     """
     return cls.lookup(name).apply(named_args)
 
-  def encode(self, unused_encoder):
+  def encode_invocation(self, unused_encoder):
     return self._signature['name']
+
+  def encode_cloud_invocation(self, unused_encoder):
+    return {'functionName': self._signature['name']}
 
   def getSignature(self):
     """Returns a description of the interface provided by this function."""
@@ -202,7 +205,8 @@ class ApiFunction(function.Function):
           return lambda *args, **kwargs: func.call(*args, **kwargs)  # pylint: disable=unnecessary-lambda
         bound_function = MakeBoundFunction(api_func)
 
-        # Add docs.
+        # Add docs. If there are non-ASCII characters in the docs, and we're in
+        # Python 2, use a hammer to force them into a str.
         try:
           setattr(bound_function, '__name__', str(name))
         except TypeError:
@@ -219,6 +223,11 @@ class ApiFunction(function.Function):
         if signature.get('deprecated'):
           deprecated_decorator = deprecation.Deprecated(signature['deprecated'])
           bound_function = deprecated_decorator(bound_function)
+
+        # Mark as preview if needed.
+        if signature.get('preview'):
+          bound_function.__doc__ += (
+              '\nPREVIEW: This function is preview or internal only.')
 
         # Decide whether this is a static or an instance function.
         is_instance = (signature['args'] and

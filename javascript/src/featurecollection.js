@@ -9,6 +9,7 @@ goog.require('ee.Collection');
 goog.require('ee.ComputedObject');
 goog.require('ee.Feature');
 goog.require('ee.Geometry');
+goog.require('ee.Image');
 goog.require('ee.List');
 goog.require('ee.Types');
 goog.require('ee.arguments');
@@ -20,7 +21,6 @@ goog.require('goog.array');
 /**
  * FeatureCollections can be constructed from the following arguments:
  *   - A string: assumed to be the name of a collection.
- *   - A number: assumed to be the ID of a Fusion Table.
  *   - A single geometry.
  *   - A single feature.
  *   - A list of features.
@@ -30,7 +30,7 @@ goog.require('goog.array');
  *         ee.Geometry|ee.Feature|ee.FeatureCollection} args
  *     The constructor arguments.
  * @param {string=} opt_column The name of the geometry column to use.  Only
- *     useful with constructor types 1 and 2.
+ *     useful when working with a named collection.
  * @constructor
  * @extends {ee.Collection}
  * @export
@@ -61,26 +61,26 @@ ee.FeatureCollection = function(args, opt_column) {
     args = [args];
   }
 
-  if (ee.Types.isNumber(args) || ee.Types.isString(args)) {
+  if (ee.Types.isString(args)) {
     // An ID.
     var actualArgs = {'tableId': args};
     if (opt_column) {
       actualArgs['geometryColumn'] = opt_column;
     }
-    goog.base(this, new ee.ApiFunction('Collection.loadTable'), actualArgs);
+    ee.FeatureCollection.base(this, 'constructor', new ee.ApiFunction('Collection.loadTable'), actualArgs);
   } else if (goog.isArray(args)) {
     // A list of features.
-    goog.base(this, new ee.ApiFunction('Collection'), {
+    ee.FeatureCollection.base(this, 'constructor', new ee.ApiFunction('Collection'), {
       'features': goog.array.map(args, function(elem) {
         return new ee.Feature(elem);
       })
     });
   } else if (args instanceof ee.List) {
     // A computed list of features.  This can't get the extra ee.Feature()
-    goog.base(this, new ee.ApiFunction('Collection'), { 'features': args });
+    ee.FeatureCollection.base(this, 'constructor', new ee.ApiFunction('Collection'), { 'features': args });
   } else if (args instanceof ee.ComputedObject) {
     // A custom object to reinterpret as a FeatureCollection.
-    goog.base(this, args.func, args.args, args.varName);
+    ee.FeatureCollection.base(this, 'constructor', args.func, args.args, args.varName);
   } else {
     throw Error('Unrecognized argument type to convert to a ' +
                 'FeatureCollection: ' + args);
@@ -122,27 +122,29 @@ ee.FeatureCollection.reset = function() {
  * An imperative function that returns a map id and token, suitable for
  * generating a Map overlay.
  *
- * @param {Object?=} opt_visParams The visualization parameters. Currently only
+ * @param {?Object=} opt_visParams The visualization parameters. Currently only
  *     one parameter, 'color', containing an RGB color string is allowed.  If
  *     vis_params isn't specified, then the color #000000 is used.
- * @param {function(Object, string=)=} opt_callback An async callback.
+ * @param {function(!Object, string=)=} opt_callback An async callback.
  *     If not supplied, the call is made synchronously.
- * @return {ee.data.MapId|undefined} An object containing a mapid string, an
- *     acess token, plus a Collection.draw image wrapping this collection. Or
- *     undefined if a callback was specified.
+ * @return {!ee.data.MapId|undefined} An object which may be passed to
+ *     ee.data.getTileUrl or ui.Map.addLayer, including an additional 'image'
+ *     field, containing a Collection.draw image wrapping a FeatureCollection
+ *     containing this feature. Undefined if a callback was specified.
  * @export
  */
 ee.FeatureCollection.prototype.getMap = function(opt_visParams, opt_callback) {
-  var args = ee.arguments.extract(
+  var args = ee.arguments.extractFromFunction(
       ee.FeatureCollection.prototype.getMap, arguments);
 
-  var painted = ee.ApiFunction._apply('Collection.draw', {
-    'collection': this,
-    'color': (args['visParams'] || {})['color'] || '000000'
-  });
+  var painted = /** @type {!ee.Image} */(
+      ee.ApiFunction._apply('Collection.draw', {
+        'collection': this,
+        'color': (args['visParams'] || {})['color'] || '000000'
+      }));
 
   if (args['callback']) {
-    painted.getMap(null, args['callback']);
+    painted.getMap(undefined, args['callback']);
   } else {
     return painted.getMap();
   }
@@ -167,7 +169,7 @@ ee.FeatureCollection.prototype.getMap = function(opt_visParams, opt_callback) {
  */
 ee.FeatureCollection.prototype.getInfo = function(opt_callback) {
   return /** @type {ee.data.FeatureCollectionDescription} */(
-      goog.base(this, 'getInfo', opt_callback));
+      ee.FeatureCollection.base(this, 'getInfo', opt_callback));
 };
 
 
@@ -186,7 +188,7 @@ ee.FeatureCollection.prototype.getInfo = function(opt_callback) {
  */
 ee.FeatureCollection.prototype.getDownloadURL = function(
     opt_format, opt_selectors, opt_filename, opt_callback) {
-  var args = ee.arguments.extract(
+  var args = ee.arguments.extractFromFunction(
       ee.FeatureCollection.prototype.getDownloadURL, arguments);
   var request = {};
   request['table'] = this.serialize();
@@ -214,28 +216,43 @@ ee.FeatureCollection.prototype.getDownloadURL = function(
     });
   } else {
     return ee.data.makeTableDownloadUrl(
-        /** @type {ee.data.DownloadId} */ (
+        /** @type {!ee.data.DownloadId} */ (
             ee.data.getTableDownloadId(request)));
   }
 };
 
 
 /**
- * Select properties from each Feature in a collection.
+ * Select properties from each Feature in a collection.  It is also
+ * possible to call this function with only string arguments; they
+ * will be all be interpreted as propertySelectors (varargs).
  *
- * @param {Array.<string>} selectors A list of names or regexes
+ * @param {!Array<string>} propertySelectors A list of names or regexes
  *     specifying the attributes to select.
- * @param {Array.<string>=} opt_names A list of new names for the output
- *     properties. Must match the number of properties selected.
- * @return {ee.FeatureCollection} The feature collection with selected
- * properties.
+ * @param {!Array<string>=} opt_newProperties A list of new names for the
+ *     output properties. Must match the number of properties selected.
+ * @param {boolean=} opt_retainGeometry When false, the result will have a
+ *     NULL geometry. Defaults to true.
+ * @return {!ee.FeatureCollection} The feature collection with selected
+ *     properties.
  * @export
  */
-ee.FeatureCollection.prototype.select = function(selectors, opt_names) {
-  var varargs = arguments;
-  return /** @type {ee.FeatureCollection} */(this.map(function(feature) {
-    return feature.select.apply(feature, varargs);
-  }));
+ee.FeatureCollection.prototype.select = function(
+    propertySelectors, opt_newProperties, opt_retainGeometry) {
+  if (ee.Types.isString(propertySelectors)) {
+    // Varargs.
+    var varargs = Array.prototype.slice.call(arguments);
+    return /** @type {!ee.FeatureCollection} */ (this.map(function(feature) {
+      return /** @type {!ee.Feature} */(feature).select(varargs);
+    }));
+  } else {
+    // Translate the argument names.
+    var args = ee.arguments.extractFromFunction(
+        ee.FeatureCollection.prototype.select, arguments);
+    return /** @type {!ee.FeatureCollection} */ (this.map(function(feature) {
+      return /** @type {!ee.Feature} */(feature).select(args);
+    }));
+  }
 };
 
 
